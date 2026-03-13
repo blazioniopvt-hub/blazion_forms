@@ -1,0 +1,63 @@
+# ============================================
+# Blazion Forms — Redis Deployment
+# In-memory cache + session store
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blazion-redis
+  namespace: blazion
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blazion-redis
+  template:
+    metadata:
+      labels:
+        app: blazion-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blazion-redis
+  namespace: blazion
+spec:
+  selector:
+    app: blazion-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: blazion
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

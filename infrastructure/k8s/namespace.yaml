@@ -1,0 +1,9 @@
+# ============================================
+# Blazion Forms — Kubernetes Namespace
+# ============================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blazion
+  labels:
+    app: blazion-forms

@@ -1,0 +1,14 @@
+node_modules
+.next
+dist
+.git
+.github
+*.md
+.env*
+docker-compose*.yml
+infrastructure
+.turbo
+*.log
+coverage
+.vscode
+.idea

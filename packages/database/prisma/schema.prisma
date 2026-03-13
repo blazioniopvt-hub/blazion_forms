@@ -1,0 +1,371 @@
+// =============================================================
+// Blazion Forms — Production Database Schema v3
+// AI + Automations + Integrations + Billing + Teams + Scale
+// =============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────
+// Auth & Users
+// ──────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique @db.VarChar(255)
+  passwordHash    String?   @db.VarChar(255)
+  name            String?   @db.VarChar(255)
+  avatarUrl       String?   @db.VarChar(500)
+  googleId        String?   @unique @db.VarChar(255)
+  emailVerified   Boolean   @default(false)
+  resetToken      String?   @db.VarChar(255)
+  resetTokenExp   DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  ownedWorkspaces Workspace[]         @relation("WorkspaceOwner")
+  memberships     WorkspaceMember[]
+  refreshTokens   RefreshToken[]
+  aiUsageLogs     AiUsageLog[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  token     String   @unique @db.VarChar(500)
+  userId    String   @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ──────────────────────────────────────────────
+// Workspaces & Teams
+// ──────────────────────────────────────────────
+
+model Workspace {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  slug      String   @unique @db.VarChar(255)
+  ownerId   String   @db.Uuid
+  plan      String   @default("free") @db.VarChar(50) // free, pro, business
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner         User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members       WorkspaceMember[]
+  forms         Form[]
+  integrations  Integration[]
+  subscription  Subscription?
+  invites       WorkspaceInvite[]
+}
+
+model WorkspaceMember {
+  workspaceId String    @db.Uuid
+  userId      String    @db.Uuid
+  role        String    @default("editor") @db.VarChar(50) // owner, admin, editor, viewer
+  joinedAt    DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+}
+
+model WorkspaceInvite {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  email       String    @db.VarChar(255)
+  role        String    @default("editor") @db.VarChar(50)
+  token       String    @unique @db.VarChar(255)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+}
+
+// ──────────────────────────────────────────────
+// Forms & Fields
+// ──────────────────────────────────────────────
+
+model Form {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @db.Uuid
+  title            String    @db.VarChar(255)
+  slug             String    @unique @db.VarChar(255)
+  description      String?   @db.Text
+  status           String    @default("draft") @db.VarChar(50)
+  totalPages       Int       @default(1)
+  responseCount    Int       @default(0) // Denormalized counter for fast listing
+  themeSettings    Json?     @default("{}")
+  settings         Json?     @default("{}")
+  conditionalLogic Json?     @default("[]")
+  customCss        String?   @db.Text
+  coverImageUrl    String?   @db.VarChar(500)
+  thankYouMessage  String?   @db.Text
+  redirectUrl      String?   @db.VarChar(500)
+  isTemplate       Boolean   @default(false)
+  templateCategory String?   @db.VarChar(100)
+  aiGenerated      Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  publishedAt      DateTime?
+  closedAt         DateTime?
+
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fields      FormField[]
+  responses   Response[]
+  analytics   FormAnalytics[]
+  webhooks    Webhook[]
+  automations Automation[]
+
+  @@index([workspaceId])
+  @@index([slug])
+  @@index([status])
+  @@index([workspaceId, status]) // Composite: list forms by workspace + status
+  @@index([isTemplate, templateCategory]) // Template browsing
+}
+
+model FormField {
+  id          String  @id @default(uuid()) @db.Uuid
+  formId      String  @db.Uuid
+  type        String  @db.VarChar(50)
+  label       String  @db.Text
+  description String? @db.Text
+  placeholder String? @db.VarChar(500)
+  required    Boolean @default(false)
+  orderIndex  Int
+  pageNumber  Int     @default(1)
+  properties  Json?   @default("{}")
+  validation  Json?   @default("{}")
+  conditional Json?   @default("{}")
+
+  form    Form             @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers ResponseAnswer[]
+
+  @@index([formId])
+}
+
+// ──────────────────────────────────────────────
+// Responses & Submissions
+// ──────────────────────────────────────────────
+
+model Response {
+  id           String    @id @default(uuid()) @db.Uuid
+  formId       String    @db.Uuid
+  respondentIp String?   @db.VarChar(45)
+  userAgent    String?   @db.VarChar(500)
+  sessionId    String?   @db.VarChar(255)
+  isCompleted  Boolean   @default(false)
+  isSpam       Boolean   @default(false)
+  spamScore    Decimal?  @db.Decimal(3, 2)
+  startedAt    DateTime  @default(now())
+  submittedAt  DateTime?
+  answers      Json?     @default("{}") // Denormalized JSONB for fast reads
+  metadata     Json?     @default("{}")
+
+  form          Form             @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answerDetails ResponseAnswer[] // Normalized answers for complex queries
+
+  @@index([formId])
+  @@index([submittedAt])
+  @@index([formId, submittedAt]) // Composite: response listing by form + date
+  @@index([formId, isCompleted]) // Composite: analytics queries
+  @@index([isCompleted, submittedAt]) // Composite: global completion reports
+}
+
+model ResponseAnswer {
+  id         String  @id @default(uuid()) @db.Uuid
+  responseId String  @db.Uuid
+  fieldId    String  @db.Uuid
+  valueText  String? @db.Text
+  valueJson  Json?
+  fileUrl    String? @db.VarChar(500)
+
+  response Response  @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  field    FormField @relation(fields: [fieldId], references: [id])
+
+  @@index([responseId])
+  @@index([fieldId])
+}
+
+// ──────────────────────────────────────────────
+// Analytics
+// ──────────────────────────────────────────────
+
+model FormAnalytics {
+  id             String   @id @default(uuid()) @db.Uuid
+  formId         String   @db.Uuid
+  date           DateTime @db.Date
+  views          Int      @default(0)
+  starts         Int      @default(0)
+  completions    Int      @default(0)
+  avgTimeSeconds Int      @default(0)
+  dropoffPage    Json?    @default("{}")
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, date])
+  @@index([formId])
+}
+
+// ──────────────────────────────────────────────
+// Webhooks
+// ──────────────────────────────────────────────
+
+model Webhook {
+  id        String   @id @default(uuid()) @db.Uuid
+  formId    String   @db.Uuid
+  url       String   @db.VarChar(500)
+  secret    String?  @db.VarChar(255)
+  events    String[] @default(["response.created"])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([formId])
+}
+
+// ──────────────────────────────────────────────
+// Automations Engine
+// ──────────────────────────────────────────────
+
+model Automation {
+  id          String   @id @default(uuid()) @db.Uuid
+  formId      String   @db.Uuid
+  name        String   @db.VarChar(255)
+  trigger     String   @db.VarChar(100) // form.submitted, form.started, field.changed
+  conditions  Json?    @default("[]")   // conditional filtering
+  actions     Json     @default("[]")   // array of action steps
+  isActive    Boolean  @default(true)
+  runCount    Int      @default(0)
+  lastRunAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  form Form              @relation(fields: [formId], references: [id], onDelete: Cascade)
+  logs AutomationLog[]
+
+  @@index([formId])
+}
+
+model AutomationLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  automationId String   @db.Uuid
+  status       String   @db.VarChar(50) // success, failed, skipped
+  duration     Int      @default(0) // ms
+  input        Json?
+  output       Json?
+  error        String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@index([automationId])
+  @@index([createdAt])
+}
+
+// ──────────────────────────────────────────────
+// Integrations (Slack, Sheets, Notion, etc.)
+// ──────────────────────────────────────────────
+
+model Integration {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  provider    String   @db.VarChar(50) // slack, google_sheets, notion, zapier
+  name        String   @db.VarChar(255)
+  config      Json     @default("{}")  // tokens, channel IDs, sheet IDs, etc.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// ──────────────────────────────────────────────
+// Billing & Subscriptions
+// ──────────────────────────────────────────────
+
+model Subscription {
+  id                   String    @id @default(uuid()) @db.Uuid
+  workspaceId          String    @unique @db.Uuid
+  stripeCustomerId     String?   @unique @db.VarChar(255)
+  stripeSubscriptionId String?   @unique @db.VarChar(255)
+  plan                 String    @default("free") @db.VarChar(50) // free, pro, business
+  status               String    @default("active") @db.VarChar(50) // active, canceled, past_due
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// ──────────────────────────────────────────────
+// AI Usage Tracking
+// ──────────────────────────────────────────────
+
+model AiUsageLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  feature     String   @db.VarChar(100) // form_generation, response_insight, suggestion
+  prompt      String?  @db.Text
+  tokensUsed  Int      @default(0)
+  durationMs  Int      @default(0)
+  success     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ──────────────────────────────────────────────
+// File Uploads
+// ──────────────────────────────────────────────
+
+model FileUpload {
+  id           String   @id @default(uuid()) @db.Uuid
+  originalName String   @db.VarChar(500)
+  storagePath  String   @db.VarChar(500)
+  mimeType     String   @db.VarChar(100)
+  sizeBytes    Int
+  uploadedBy   String?  @db.Uuid
+  createdAt    DateTime @default(now())
+}
+
+// ──────────────────────────────────────────────
+// Background Jobs / Queue
+// ──────────────────────────────────────────────
+
+model JobQueue {
+  id          String   @id @default(uuid()) @db.Uuid
+  type        String   @db.VarChar(100) // email, webhook, automation, export
+  payload     Json
+  status      String   @default("pending") @db.VarChar(50) // pending, processing, done, failed
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  error       String?  @db.Text
+  scheduledAt DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([type])
+  @@index([status, scheduledAt]) // Composite: job queue polling query
+  @@index([status, completedAt]) // Composite: cleanup query
+}
