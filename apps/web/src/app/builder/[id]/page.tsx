@@ -116,7 +116,7 @@ export default function BuilderPage() {
                 <X
                   size={11}
                   style={{ marginLeft: 4, cursor: 'pointer' }}
-                  onClick={(e) => {
+                  onClick={(e: React.MouseEvent) => {
                     e.stopPropagation();
                     if (confirm('Delete this page and all its fields?')) {
                       removePage(i + 1);
