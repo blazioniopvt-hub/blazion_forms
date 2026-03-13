@@ -13,9 +13,8 @@
     "lint": "turbo run lint"
   },
   "devDependencies": {
-    "turbo": "latest"
+    "turbo": "latest",
+    "vercel": "^50.32.5"
   },
-  "dependencies": {
-    "@next/swc-win32-x64-msvc": "^14.2.3"
-  }
+  "dependencies": {}
 }
